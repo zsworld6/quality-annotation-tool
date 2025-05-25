@@ -22,7 +22,6 @@ QUALITY_OPTIONS = [
 # 获取项目根目录
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
-SAMPLE_DIR = DATA_DIR / "sample"
 OUTPUT_DIR = DATA_DIR / "output"
 
 # 确保目录存在
@@ -97,14 +96,6 @@ def save_annotations_to_file(annotations, output_file):
         st.error(f"保存文件时出错: {e}")
         return False
 
-def get_sample_files():
-    """获取示例文件列表"""
-    sample_files = []
-    if SAMPLE_DIR.exists():
-        for file_path in SAMPLE_DIR.glob("*.jsonl"):
-            sample_files.append(str(file_path))
-    return sample_files
-
 def main():
     st.title("🏷️ 质量评分标注工具")
     
@@ -114,12 +105,30 @@ def main():
     # 文件选择方式
     file_source = st.sidebar.radio(
         "选择数据源",
-        ["上传文件", "使用示例数据", "输入文件路径"]
+        ["仓库数据文件", "上传文件", "输入文件路径"]
     )
     
     input_file = None
     
-    if file_source == "上传文件":
+    if file_source == "仓库数据文件":
+        # 获取仓库中的JSONL文件
+        jsonl_dir = BASE_DIR / "data" / "jsonl"
+        if jsonl_dir.exists():
+            jsonl_files = list(jsonl_dir.glob("*.jsonl"))
+            if jsonl_files:
+                file_names = [f.name for f in jsonl_files]
+                selected_file = st.sidebar.selectbox(
+                    "选择数据文件",
+                    file_names
+                )
+                input_file = str(jsonl_dir / selected_file)
+                st.sidebar.success(f"✅ 已选择: {selected_file}")
+            else:
+                st.sidebar.warning("仓库中没有找到JSONL文件")
+        else:
+            st.sidebar.warning("数据目录不存在")
+            
+    elif file_source == "上传文件":
         uploaded_file = st.sidebar.file_uploader(
             "上传JSONL文件",
             type=['jsonl'],
@@ -131,32 +140,25 @@ def main():
             with open(temp_file, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             input_file = str(temp_file)
-            
-    elif file_source == "使用示例数据":
-        sample_files = get_sample_files()
-        if sample_files:
-            selected_sample = st.sidebar.selectbox(
-                "选择示例文件",
-                sample_files
-            )
-            input_file = selected_sample
-        else:
-            st.sidebar.warning("没有找到示例数据文件")
+            st.sidebar.success(f"✅ 文件已上传: {uploaded_file.name}")
             
     else:  # 输入文件路径
         input_file = st.sidebar.text_input(
             "输入文件路径",
-            value="./data/sample/sample_input.jsonl",
+            value="",
+            placeholder="/path/to/your/data.jsonl",
             help="输入JSONL文件的完整路径"
         )
     
     # 图片目录路径
-    if file_source == "使用示例数据":
-        image_base_dir = str(SAMPLE_DIR)
+    if file_source == "仓库数据文件":
+        image_base_dir = str(BASE_DIR / "data" / "images")
+        st.sidebar.write(f"**图片目录**: `data/images/`")
     else:
         image_base_dir = st.sidebar.text_input(
             "图片基础目录",
-            value="./data/sample/",
+            value="",
+            placeholder="/path/to/images/",
             help="图片文件的基础目录路径"
         )
     
@@ -195,27 +197,42 @@ def main():
         ## 📖 使用说明
         
         ### 1. 数据准备
+        - **仓库数据文件**: 使用仓库中预置的数据文件（推荐）
         - **上传文件**: 直接上传你的JSONL格式数据文件
-        - **示例数据**: 使用预置的示例数据进行测试
         - **文件路径**: 输入服务器上的文件完整路径
         
         ### 2. 标注流程
         1. 选择标注者身份 (lpr/zsh/zxh)
-        2. 加载数据文件
-        3. 查看图片和HTML内容
-        4. 点击质量评分按钮 (P0/P1/P2)
-        5. 自动保存并跳转到下一条
+        2. 选择对应的数据文件：
+           - lpr → test_set_unmatched_part1.jsonl
+           - zsh → test_set_unmatched_part2.jsonl  
+           - zxh → test_set_unmatched_part3.jsonl
+        3. 点击"🔄 加载数据"
+        4. 查看图片和HTML内容
+        5. 点击质量评分按钮 (P0/P1/P2)
+        6. 自动保存并跳转到下一条
         
         ### 3. 数据格式
         输入的JSONL文件每行应包含以下字段：
         ```json
         {
             "url_id": "唯一标识符",
-            "ori_pic": "图片路径",
+            "ori_pic": "图片路径 (如: pic/xxx.png)",
             "ori_html": "原始HTML内容",
-            "predicted_quality_score": "模型预测评分"
+            "predicted_quality_score": "模型预测评分",
+            "processed_html": "处理后的文本内容"
         }
         ```
+        
+        ### 4. 质量评分标准
+        - **P0 (质量很好)**: 内容丰富，信息完整，格式良好
+        - **P1 (质量一般)**: 内容基本完整，有一定信息价值  
+        - **P2 (质量差，信息量少)**: 内容缺失严重，信息价值低
+        
+        ### 5. 工作分配
+        - **lpr**: 负责标注 part1 数据
+        - **zsh**: 负责标注 part2 数据  
+        - **zxh**: 负责标注 part3 数据
         """)
         return
     
@@ -326,7 +343,10 @@ def main():
     with col_left:
         st.subheader("🖼️ 图片预览")
         image_path = current_data.get('ori_pic', '')
-        display_image(image_path, image_base_dir)
+        if image_path and image_base_dir:
+            display_image(image_path, image_base_dir)
+        else:
+            st.text("📷 请设置图片基础目录")
         
         st.subheader("🤖 模型预测")
         st.write(f"**预测质量评分**: {current_data.get('predicted_quality_score', 'N/A')}")
@@ -353,8 +373,15 @@ def main():
                 disabled=True
             )
         
-        # URL ID
-        st.write(f"**URL ID**: `{current_data.get('url_id', 'N/A')}`")
+        # 显示其他字段
+        st.write("**其他信息**:")
+        for key, value in current_data.items():
+            if key not in ['ori_html', 'processed_html', 'ori_pic']:
+                if isinstance(value, str) and len(value) > 100:
+                    with st.expander(f"查看 {key}"):
+                        st.write(value)
+                else:
+                    st.write(f"**{key}**: {value}")
     
     st.divider()  # 添加分隔线
     
@@ -368,7 +395,8 @@ def main():
         "标注备注（可选）",
         value=existing_note,
         key=f"note_{current_index}",
-        height=100
+        height=100,
+        placeholder="可以在这里记录标注理由、特殊情况等..."
     )
     
     # 处理按钮点击事件
@@ -399,6 +427,7 @@ def main():
                 st.rerun()
             else:
                 st.success("🎉 所有数据已标注完成!")
+                st.balloons()  # 显示庆祝动画
         else:
             st.error("❌ 保存失败")
     
@@ -431,6 +460,9 @@ def main():
         if len(data) > 0:
             completion_rate = len(existing_annotations) / len(data) * 100
             st.sidebar.write(f"**完成度**: {completion_rate:.1f}%")
+            
+            # 进度条
+            st.sidebar.progress(completion_rate / 100)
     else:
         st.sidebar.write("暂无标注数据")
     
